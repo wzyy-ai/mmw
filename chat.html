@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>呆呆Chat</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        .hidden {
+            display: none;
+        }
+        
+        #chatPage {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-windows {
+            flex: 1;
+            display: grid;
+            gap: 1rem;
+            padding: 1rem;
+            overflow-y: auto;
+        }
+
+        .chat-window {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        .chat-header {
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .message {
+            margin-bottom: 10px;
+            padding: 8px;
+            border-radius: 8px;
+        }
+
+        .user-message {
+            background-color: #e3f2fd;
+            margin-left: 20%;
+        }
+
+        .model-message {
+            background-color: #f5f5f5;
+            margin-right: 20%;
+        }
+
+        .message-time {
+            font-size: 0.8em;
+            color: #666;
+            margin-top: 4px;
+        }
+
+        .chat-input-container {
+            padding: 10px;
+            border-top: 1px solid #ddd;
+        }
+
+        .windows-2 {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
+        .windows-3 {
+            grid-template-columns: repeat(3, 1fr);
+        }
+
+        .windows-4 {
+            grid-template-columns: repeat(2, 1fr);
+            grid-template-rows: repeat(2, 1fr);
+        }
+
+        .windows-6 {
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(2, 1fr);
+        }
+    </style>
+</head>
+<body>
+    <!-- API配置页面 -->
+    <div id="apiPage" class="container mt-5">
+        <div class="row justify-content-center">
+            <div class="col-md-6">
+                <h2 class="text-center mb-4">API 配置</h2>
+                <div class="mb-3">
+                    <label class="form-label">API 地址</label>
+                    <input type="text" class="form-control" id="apiUrl" value="https://aihubmix.com/v1">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">API Key</label>
+                    <input type="password" class="form-control" id="apiKey">
+                </div>
+                <button class="btn btn-primary w-100" onclick="saveApiConfig()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 聊天主页面 -->
+    <div id="chatPage" class="hidden">
+        <!-- 顶部标题栏 -->
+        <div class="navbar navbar-light bg-light px-3">
+            <span class="navbar-brand">呆呆Chat</span>
+            <button class="btn btn-outline-primary" onclick="exportAllChats()">导出所有对话表格</button>
+        </div>
+
+        <!-- 对话窗口区域 -->
+        <div class="chat-windows windows-2" id="chatWindows">
+            <!-- 对话窗口将通过JS动态生成 -->
+        </div>
+
+        <!-- 底部控制区域 -->
+        <div class="container-fluid py-3 bg-light">
+            <div class="row align-items-center">
+                <div class="col-auto">
+                    <select class="form-select" id="windowCount" onchange="updateWindowCount()">
+                        <option value="2">2个窗口</option>
+                        <option value="3">3个窗口</option>
+                        <option value="4">4个窗口</option>
+                        <option value="6">6个窗口</option>
+                    </select>
+                </div>
+                <div class="col">
+                    <div class="input-group">
+                        <input type="text" class="form-control" id="globalInput" placeholder="输入要发送给所有模型的消息...">
+                        <button class="btn btn-primary" onclick="sendToAll()">发送给所有模型</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 可用的模型列表
+        const availableModels = [
+            'gpt-4',
+            'gpt-3.5-turbo',
+            'claude-2',
+            'claude-instant-1',
+            'gemini-pro'
+        ];
+
+        let apiConfig = {
+            url: '',
+            key: ''
+        };
+
+        // 保存API配置
+        function saveApiConfig() {
+            apiConfig.url = document.getElementById('apiUrl').value.trim();
+            apiConfig.key = document.getElementById('apiKey').value.trim();
+            
+            if (!apiConfig.url || !apiConfig.key) {
+                alert('请填写完整的API配置信息');
+                return;
+            }
+
+            document.getElementById('apiPage').classList.add('hidden');
+            document.getElementById('chatPage').classList.remove('hidden');
+            
+            // 初始化聊天窗口
+            updateWindowCount();
+        }
+
+        // 创建单个聊天窗口
+        function createChatWindow() {
+            const div = document.createElement('div');
+            div.className = 'chat-window';
+            div.innerHTML = `
+                <div class="chat-header">
+                    <select class="form-select form-select-sm w-auto">
+                        ${availableModels.map(model => `<option value="${model}">${model}</option>`).join('')}
+                    </select>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="exportChat(this)">导出当前对话</button>
+                </div>
+                <div class="chat-messages"></div>
+                <div class="chat-input-container">
+                    <div class="input-group">
+                        <button class="btn btn-outline-secondary" onclick="clearInput(this)">清除</button>
+                        <input type="text" class="form-control" placeholder="输入消息...">
+                        <button class="btn btn-primary" onclick="sendMessage(this)">发送</button>
+                    </div>
+                </div>
+            `;
+            return div;
+        }
+
+        // 更新窗口数量
+        function updateWindowCount() {
+            const count = parseInt(document.getElementById('windowCount').value);
+            const container = document.getElementById('chatWindows');
+            
+            // 更新布局类名
+            container.className = `chat-windows windows-${count}`;
+            
+            // 清空现有窗口
+            container.innerHTML = '';
+            
+            // 创建新窗口
+            for (let i = 0; i < count; i++) {
+                container.appendChild(createChatWindow());
+            }
+        }
+
+        // 发送消息到单个窗口
+        async function sendMessage(button) {
+            const chatWindow = button.closest('.chat-window');
+            const input = chatWindow.querySelector('input');
+            const messagesContainer = chatWindow.querySelector('.chat-messages');
+            const model = chatWindow.querySelector('select').value;
+            const message = input.value.trim();
+
+            if (!message) return;
+
+            // 添加用户消息
+            addMessage(messagesContainer, message, 'user');
+            input.value = '';
+
+            try {
+                // 发送API请求
+                const response = await sendToApi(message, model);
+                // 添加模型回复
+                addMessage(messagesContainer, response, 'model');
+            } catch (error) {
+                addMessage(messagesContainer, `错误: ${error.message}`, 'model');
+            }
+        }
+
+        // 向所有模型发送消息
+        async function sendToAll() {
+            const globalInput = document.getElementById('globalInput');
+            const message = globalInput.value.trim();
+            
+            if (!message) return;
+
+            const windows = document.querySelectorAll('.chat-window');
+            windows.forEach(async (window) => {
+                const messagesContainer = window.querySelector('.chat-messages');
+                const model = window.querySelector('select').value;
+
+                // 添加用户消息
+                addMessage(messagesContainer, message, 'user');
+
+                try {
+                    // 发送API请求
+                    const response = await sendToApi(message, model);
+                    // 添加模型回复
+                    addMessage(messagesContainer, response, 'model');
+                } catch (error) {
+                    addMessage(messagesContainer, `错误: ${error.message}`, 'model');
+                }
+            });
+
+            globalInput.value = '';
+        }
+
+        // 添加消息到对话窗口
+        function addMessage(container, content, sender) {
+            const div = document.createElement('div');
+            div.className = `message ${sender}-message`;
+            div.innerHTML = `
+                <div class="message-content">${marked.parse(content)}</div>
+                <div class="message-time">${new Date().toLocaleString()}</div>
+            `;
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        // 发送API请求
+        async function sendToApi(message, model) {
+            try {
+                const response = await fetch(apiConfig.url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiConfig.key}`
+                    },
+                    body: JSON.stringify({
+                        model: model,
+                        messages: [{
+                            role: 'user',
+                            content: message
+                        }]
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                return data.choices[0].message.content;
+            } catch (error) {
+                console.error('API请求错误:', error);
+                throw error;
+            }
+        }
+
+        // 清除输入框
+        function clearInput(button) {
+            const input = button.closest('.chat-input-container').querySelector('input');
+            input.value = '';
+        }
+
+        // 导出单个对话记录
+        function exportChat(button) {
+            const chatWindow = button.closest('.chat-window');
+            const messages = chatWindow.querySelectorAll('.message');
+            const model = chatWindow.querySelector('select').value;
+            
+            const data = Array.from(messages).map(msg => {
+                const isUser = msg.classList.contains('user-message');
+                return {
+                    '身份': isUser ? '用户' : '模型',
+                    '发送内容': msg.querySelector('.message-content').textContent,
+                    '发送时间': msg.querySelector('.message-time').textContent,
+                    '模型名称': model
+                };
+            });
+
+            downloadCsv(data, `对话记录_${model}_${new Date().toISOString()}.csv`);
+        }
+
+        // 导出所有对话记录
+        function exportAllChats() {
+            const allData = [];
+            document.querySelectorAll('.chat-window').forEach(window => {
+                const model = window.querySelector('select').value;
+                const messages = window.querySelectorAll('.message');
+                
+                messages.forEach(msg => {
+                    const isUser = msg.classList.contains('user-message');
+                    allData.push({
+                        '身份': isUser ? '用户' : '模型',
+                        '发送内容': msg.querySelector('.message-content').textContent,
+                        '发送时间': msg.querySelector('.message-time').textContent,
+                        '模型名称': model
+                    });
+                });
+            });
+
+            downloadCsv(allData, `所有对话记录_${new Date().toISOString()}.csv`);
+        }
+
+        // 下载CSV文件
+        function downloadCsv(data, filename) {
+            const headers = Object.keys(data[0]);
+            const csv = [
+                headers.join(','),
+                ...data.map(row => headers.map(header => `"${row[header]}"`).join(','))
+            ].join('\n');
+
+            const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = filename;
+            link.click();
+        }
+    </script>
+</body>
+</html> 
